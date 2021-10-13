@@ -61,7 +61,7 @@ static void co_ctx_yield(struct co_ctx *co_ctx) {
 	swapcontext(&co_ctx->child_ctx, &co_ctx->parent_ctx);
 }
 
-int co_ctx_child_call(struct co_ctx *co_ctx, int (*fn)(void *), void *args) {
+int co_ctx_call_child(struct co_ctx *co_ctx, int (*fn)(void *), void *args) {
 	int ret = fn(args);
 	if (ret == -EBUSY) {
 		co_ctx_yield(co_ctx);
@@ -73,13 +73,13 @@ int co_ctx_child_call(struct co_ctx *co_ctx, int (*fn)(void *), void *args) {
 	return ret;
 }
 
-static void _co_ctx_parent_call(struct co_ctx *co_ctx, int (*fn)(void *), void *args) {
+static void _co_ctx_call_parent(struct co_ctx *co_ctx, int (*fn)(void *), void *args) {
 	co_ctx->pending_callback = true;
 	co_ctx->err = fn(args);
 	co_ctx->pending_callback = false;
 }
 
-int co_ctx_parent_call(struct co_ctx *co_ctx, int (*fn)(void *), void *args) {
+int co_ctx_call_parent(struct co_ctx *co_ctx, int (*fn)(void *), void *args) {
 	int ret = getcontext(&co_ctx->child_ctx);
 	if (ret < -1) {
 		return ret;
@@ -88,7 +88,7 @@ int co_ctx_parent_call(struct co_ctx *co_ctx, int (*fn)(void *), void *args) {
 	co_ctx->child_ctx.uc_link = &co_ctx->parent_ctx;
 	co_ctx->child_ctx.uc_stack.ss_sp = co_ctx->child_ctx_stack;
 	co_ctx->child_ctx.uc_stack.ss_size = sizeof co_ctx->child_ctx_stack;
-	makecontext(&co_ctx->child_ctx, (void (*) (void))_co_ctx_parent_call, 3, co_ctx, fn, args);
+	makecontext(&co_ctx->child_ctx, (void (*) (void))_co_ctx_call_parent, 3, co_ctx, fn, args);
 	swapcontext(&co_ctx->parent_ctx, &co_ctx->child_ctx);
 	if (!co_ctx->pending_callback) {
 		return co_ctx->err;

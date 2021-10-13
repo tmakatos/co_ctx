@@ -42,11 +42,28 @@ struct vfu_ctx {
 	struct co_ctx *co_ctx;
 };
 
-static int user_callback(void *args) {
-	static int state;
-	while (state++ < 3) {
-		return -EBUSY;
-	}
+/* Device callbacks */
+
+static int dma_unmap(void *args) {
+	/*
+  	 * Pretend that there's pending I/O and we need to wait for it to finish
+  	 * before unmapping the DMA region.
+ 	 */
+	return -EBUSY;
+}
+
+static int reset(void *args) {
+	/*
+	 * Pretend that the device needs to do a lot of stuff and can't immediately
+	 * complete the reset.
+	 */
+	return -EBUSY;
+}
+
+static int migration_state_transition(void *args) {
+	/*
+	 * Device immediately transitioned to specified migration state.
+	 */
 	return 0;
 }
 
@@ -55,21 +72,21 @@ static int vfu_handle_stuff(struct vfu_ctx *vfu_ctx) {
 	int ret;
 
 	printf("%s: DMA unmap a region\n", __func__);
-	ret = co_ctx_child_call(vfu_ctx->co_ctx, user_callback, NULL);
+	ret = co_ctx_call_child(vfu_ctx->co_ctx, dma_unmap, NULL);
 	if (ret < 0) {
 		printf("%s:%d child failed: %s\n", __func__, __LINE__, strerror(-ret));
 		return ret;
 	}
 
 	printf("%s: DMA unmap another region\n", __func__);
-	ret = co_ctx_child_call(vfu_ctx->co_ctx, user_callback, NULL);
+	ret = co_ctx_call_child(vfu_ctx->co_ctx, dma_unmap, NULL);
 	if (ret < 0) {
 		printf("%s:%d child failed: %s\n", __func__, __LINE__, strerror(-ret));
 		return ret;
 	}
 
 	printf("%s: reset\n", __func__);
-	ret = co_ctx_child_call(vfu_ctx->co_ctx, user_callback, NULL);
+	ret = co_ctx_call_child(vfu_ctx->co_ctx, reset, NULL);
 	if (ret < 0) {
 		printf("%s:%d child failed: %s\n", __func__, __LINE__, strerror(-ret));
 		return ret;
@@ -77,9 +94,19 @@ static int vfu_handle_stuff(struct vfu_ctx *vfu_ctx) {
 	
 	/* migration state */
 	printf("%s: migrate\n", __func__);
-	ret = user_callback(NULL);
+	ret = migration_state_transition(NULL);
 	assert(ret == 0);
 
+	return 0;
+}
+
+static int vfu_handle_migration_state_transition(struct vfu_ctx *vfu_ctx) {
+	printf("%s: migration\n", __func__);
+	int ret = co_ctx_call_child(vfu_ctx->co_ctx, migration_state_transition, NULL);
+	if (ret < 0) {
+		printf("%s:%d child failed: %s\n", __func__, __LINE__, strerror(-ret));
+		return ret;
+	}
 	return 0;
 }
 
@@ -87,7 +114,7 @@ static int vfu_handle_stuff(struct vfu_ctx *vfu_ctx) {
 static int get_next_request(void)
 {
 	static int i;
-	return i++ % 2;
+	return i++;
 }
 
 static int vfu_run_ctx(struct vfu_ctx *vfu_ctx) {
@@ -109,18 +136,17 @@ static int vfu_run_ctx(struct vfu_ctx *vfu_ctx) {
 
 	switch (ret) {
 		case 0:
-			ret = co_ctx_parent_call(vfu_ctx->co_ctx, (int (*) (void *))vfu_handle_stuff, vfu_ctx);
-			if (ret == -EBUSY) {
-				must_continue = true;
-			}
-			/*
-			 * We might as well return 0 here, the caller will repeatedly call
-			 * vfu_run_ctx anyway.
-			 */
-			break;		
+			ret = co_ctx_call_parent(vfu_ctx->co_ctx, (int (*) (void *))vfu_handle_stuff, vfu_ctx);
+			break;
+		case 2:
+			ret = co_ctx_call_parent(vfu_ctx->co_ctx, (int (*) (void *))vfu_handle_migration_state_transition, vfu_ctx);
+			break;
 		default: /* handle other request types */
 			ret = 0;
 			printf("did some other work\n");
+	}
+	if (ret == -EBUSY) {
+		must_continue = true;
 	}
 	return ret;
 }
@@ -156,12 +182,18 @@ int main(void) {
 	ret = vfu_run_ctx(&vfu_ctx);
 	assert(ret == -EBUSY);
 
+	/* user callback for DMA unmap is done */
 	co_ctx_done(vfu_ctx.co_ctx, 0);
 
 	ret = vfu_run_ctx(&vfu_ctx);
 	assert(ret == -EBUSY);
 	co_ctx_done(vfu_ctx.co_ctx, 0);
 
+	/* some completely unrelated work is executed */
+	ret = vfu_run_ctx(&vfu_ctx);
+	assert(ret == 0);
+
+	/* migration state transition is executed */
 	ret = vfu_run_ctx(&vfu_ctx);
 	assert(ret == 0);
 

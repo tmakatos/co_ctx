@@ -46,7 +46,7 @@ int co_ctx_size(void);
  * co_ctx_parent_call also returns -EBUSY and the caller must execute
  * co_ctx_continue until it stops returning -EBUSY.
  */
-int co_ctx_parent_call(struct co_ctx *co_ctx, int (*parent_fn)(void *), void *args);
+int co_ctx_call_parent(struct co_ctx *co_ctx, int (*parent_fn)(void *), void *args);
 
 /*
  * Calls a child function (child_fn). If the child function returns -EBUSY then
@@ -54,7 +54,8 @@ int co_ctx_parent_call(struct co_ctx *co_ctx, int (*parent_fn)(void *), void *ar
  * co_ctx_done. co_ctx_child_call must be called by a function started via
  * co_ctx_parent_call, othewise behavior is undefined.
  */
-int co_ctx_child_call(struct co_ctx *co_ctx, int (*child_fn)(void *), void *args);
+
+int co_ctx_call_child(struct co_ctx *co_ctx, int (*child_fn)(void *), void *args);
 
 /*
  * Continues execution of a parent function.
